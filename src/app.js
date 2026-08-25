@@ -1,7 +1,7 @@
 // app.js — wiring only. All the arithmetic lives in reducer.js, which is tested.
 
-import { reduce, byDate, fmtNis, STREAMS, DataError } from './reducer.js';
-import { append, buildDoc, count, newId, nowStamp, today, replaceAll } from './store.js';
+import { reduce, byDate, fmtNis, STREAMS, datesInRange, parseDateList, DataError } from './reducer.js';
+import { append, appendMany, buildDoc, count, newId, nowStamp, today, replaceAll } from './store.js';
 import { KEYS } from './config.js';
 import { push, pull, pushSoon, verifyArchive, isConfigured, lastSyncText, get, set, owner } from './sync.js';
 
@@ -24,7 +24,7 @@ let sheetDraft = null;
 async function refresh() {
   try {
     const doc = await buildDoc();
-    state = reduce(doc);
+    state = reduce(doc, today());
     index = byDate(state);
     renderAll();
   } catch (e) {
@@ -55,6 +55,17 @@ function renderHeader() {
   $('balLabel').textContent = state.balance_agorot < 0 ? 'Overpaid' : 'Outstanding';
   $('earned').textContent = fmtNis(state.earned_agorot);
   $('received').textContent = fmtNis(state.received_agorot);
+
+  const bits = [];
+  if (state.earnedDays_agorot) {
+    bits.push(state.days.length + ' days = ' + fmtNis(state.earnedDays_agorot));
+  }
+  if (state.earnedRetainer_agorot) {
+    bits.push(state.retainerCharges.length + ' mo retainer = ' + fmtNis(state.earnedRetainer_agorot));
+  }
+  const box = $('breakdown');
+  box.textContent = '';
+  for (const b of bits) box.appendChild(el('div', null, b));
 }
 
 function renderSync() {
@@ -314,6 +325,11 @@ async function renderSetup() {
   $('stEvents').textContent = await count();
   $('stSync').textContent = lastSyncText().text;
   $('stRate').textContent = state.currentRate ? fmtNis(state.currentRate) + ' NIS/day' : 'not set';
+  $('stRetainer').textContent = state.currentRetainer
+    ? fmtNis(state.currentRetainer) + ' NIS/mo  (' + state.retainerCharges.length + ' charged)'
+    : 'none';
+  if (!$('sRetAmt').value) $('sRetAmt').value = state.currentRetainer ? state.currentRetainer / 100 : '';
+  if (!$('sRetFrom').value && state.retainerCharges.length) $('sRetFrom').value = state.retainerCharges[0].month;
 
   const warn = $('setupWarn');
   warn.textContent = '';
@@ -456,6 +472,188 @@ async function restore() {
   renderSetup();
 }
 
+// ── monthly retainer ─────────────────────────────────────────────────────────
+
+async function setRetainer() {
+  const box = $('retOut');
+  const nis = parseFloat($('sRetAmt').value);
+  const from = $('sRetFrom').value; // YYYY-MM from <input type="month">
+
+  box.hidden = false;
+  if (!Number.isFinite(nis) || nis < 0) {
+    box.className = 'v err';
+    box.textContent = 'Enter an amount. Use 0 to stop the retainer.';
+    return;
+  }
+  if (!/^\d{4}-\d{2}$/.test(from)) {
+    box.className = 'v err';
+    box.textContent = 'Pick the month it starts from.';
+    return;
+  }
+
+  const agorot = Math.round(nis * 100);
+  const msg = agorot === 0
+    ? 'Stop the retainer from ' + from + ' onward?'
+    : fmtNis(agorot) + ' NIS every month from ' + from + ' onward?';
+  if (!confirm(msg + String.fromCharCode(10, 10) + 'Months already charged are not changed.')) return;
+
+  await addEvent(
+    { id: newId(), type: 'retainer_set', from_month: from, amount_agorot: agorot, recorded_at: nowStamp() },
+    'retainer ' + fmtNis(agorot) + ' from ' + from
+  );
+
+  const NL = String.fromCharCode(10);
+  box.className = 'v ok';
+  box.textContent = [
+    'Retainer set.',
+    '',
+    state.retainerCharges.length + ' month(s) charged so far:',
+  ].concat(
+    state.retainerCharges.map((c) => '  ' + c.month + '   ' + fmtNis(c.amount_agorot) + ' NIS')
+  ).concat([
+    '',
+    'Retainer total: ' + fmtNis(state.earnedRetainer_agorot) + ' NIS',
+  ]).join(NL);
+
+  renderSetup();
+}
+
+// ── bulk backfill ────────────────────────────────────────────────────────────
+
+const bulk = { dows: new Set(), portion: 'full', streams: ['ops'] };
+
+/** Exactly which dates the current selection would add, and which it would skip. */
+function bulkPlan() {
+  const from = $('bfFrom').value;
+  const to = $('bfTo').value;
+  const typed = parseDateList($('bfList').value);
+
+  let ranged = [];
+  if (from && to && bulk.dows.size) {
+    try { ranged = datesInRange(from, to, [...bulk.dows]); } catch { ranged = []; }
+  }
+
+  const all = [...new Set([...ranged, ...typed.dates])].sort();
+  if (!all.length && !typed.bad.length) return null;
+
+  return {
+    all,
+    bad: typed.bad,
+    already: all.filter((d) => index.has(d)),
+    toAdd: all.filter((d) => !index.has(d)),
+  };
+}
+
+function dayValueAgorot() {
+  const rate = state.currentRate || 0;
+  return Math.floor((rate * (bulk.portion === 'full' ? 2 : 1)) / 2);
+}
+
+function renderBulkPreview() {
+  const box = $('bfPreview');
+  const btn = $('bfAdd');
+  const plan = bulkPlan();
+  const NL = String.fromCharCode(10);
+
+  if (!plan) {
+    box.className = 'v';
+    box.textContent = 'Choose days of the week and a date range, or type dates below.';
+    btn.disabled = true;
+    return;
+  }
+
+  const lines = [];
+  if (plan.bad.length) lines.push('Not understood: ' + plan.bad.join(', '), '');
+
+  lines.push(plan.toAdd.length + ' day' + (plan.toAdd.length === 1 ? '' : 's') + ' will be added');
+  lines.push('  worth ' + fmtNis(plan.toAdd.length * dayValueAgorot()) + ' NIS');
+  if (plan.already.length) lines.push('  ' + plan.already.length + ' already logged, left alone');
+  if (plan.toAdd.length) {
+    lines.push('');
+    lines.push('First: ' + plan.toAdd[0]);
+    lines.push('Last:  ' + plan.toAdd[plan.toAdd.length - 1]);
+  }
+
+  box.className = 'v' + (plan.bad.length ? ' err' : '');
+  box.textContent = lines.join(NL);
+  btn.disabled = plan.toAdd.length === 0;
+}
+
+async function bulkAdd() {
+  const plan = bulkPlan();
+  if (!plan || !plan.toAdd.length) return;
+
+  const ok = confirm(
+    'Add ' + plan.toAdd.length + ' ' + bulk.portion + ' days?' +
+    String.fromCharCode(10, 10) +
+    plan.toAdd[0] + '  to  ' + plan.toAdd[plan.toAdd.length - 1] +
+    String.fromCharCode(10) +
+    'Worth ' + fmtNis(plan.toAdd.length * dayValueAgorot()) + ' NIS.'
+  );
+  if (!ok) return;
+
+  const btn = $('bfAdd');
+  btn.disabled = true;
+  btn.textContent = 'Adding…';
+
+  const stamp = nowStamp();
+  const events = plan.toAdd.map((date) => ({
+    id: newId(), type: 'day', date, recorded_at: stamp,
+    worked: true, portion: bulk.portion, streams: [...bulk.streams], note: '',
+  }));
+
+  // One transaction, and ONE commit — not one per day.
+  await appendMany(events);
+  await refresh();
+  set(KEYS.lastStreams, bulk.streams.join(','));
+
+  btn.textContent = 'Add these days';
+  renderBulkPreview();
+  renderSetup();
+
+  pushSoon('backfill ' + events.length + ' days', (r, e) => {
+    renderSync();
+    alert(e
+      ? 'Added ' + events.length + ' days here, but the backup failed:' +
+        String.fromCharCode(10, 10) + e.message
+      : 'Added ' + events.length + ' days and backed them up.');
+  });
+}
+
+function wireBulk() {
+  $('bfDows').querySelectorAll('[data-dow]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const d = Number(b.dataset.dow);
+      if (bulk.dows.has(d)) bulk.dows.delete(d); else bulk.dows.add(d);
+      b.setAttribute('aria-pressed', String(bulk.dows.has(d)));
+      renderBulkPreview();
+    })
+  );
+  $('bfPortion').querySelectorAll('[data-bfp]').forEach((b) =>
+    b.addEventListener('click', () => {
+      bulk.portion = b.dataset.bfp;
+      $('bfPortion').querySelectorAll('[data-bfp]').forEach((x) =>
+        x.setAttribute('aria-pressed', String(x.dataset.bfp === bulk.portion)));
+      renderBulkPreview();
+    })
+  );
+  $('bfStreams').querySelectorAll('[data-bfs]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const st = b.dataset.bfs;
+      const i = bulk.streams.indexOf(st);
+      if (i >= 0) bulk.streams.splice(i, 1); else bulk.streams.push(st);
+      if (!bulk.streams.length) bulk.streams.push('ops');
+      $('bfStreams').querySelectorAll('[data-bfs]').forEach((x) =>
+        x.setAttribute('aria-pressed', String(bulk.streams.includes(x.dataset.bfs))));
+      renderBulkPreview();
+    })
+  );
+  $('bfFrom').addEventListener('change', renderBulkPreview);
+  $('bfTo').addEventListener('change', renderBulkPreview);
+  $('bfList').addEventListener('input', renderBulkPreview);
+  $('bfAdd').addEventListener('click', bulkAdd);
+}
+
 // ── tabs / render ────────────────────────────────────────────────────────────
 
 const TABS = [['tab-days', 'v-days'], ['tab-pay', 'v-pay'], ['tab-set', 'v-set']];
@@ -517,6 +715,8 @@ function wire() {
   $('sRateSave').addEventListener('click', setRate);
   $('sExport').addEventListener('click', exportCsv);
   $('sJson').addEventListener('click', exportJson);
+  $('sRetSave').addEventListener('click', setRetainer);
+  wireBulk();
   $('sCheck').addEventListener('click', checkBackup);
   $('sRestore').addEventListener('click', restore);
 

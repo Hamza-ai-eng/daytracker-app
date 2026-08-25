@@ -13,6 +13,8 @@ import {
   rateOn,
   loggedAfterDays,
   byDate,
+  datesInRange,
+  parseDateList,
   fmtNis,
   DataError,
   SCHEMA_VERSION,
@@ -337,4 +339,215 @@ test('fmtNis renders agorot as readable NIS', () => {
   assert.equal(fmtNis(1234567), '12,345.67');
   assert.equal(fmtNis(-20000), '-200');
   assert.equal(fmtNis(0), '0');
+});
+
+// ── date ranges for bulk backfill ────────────────────────────────────────────
+// These write real paid days into the record in one action. A fencepost error
+// here silently adds or drops 400 NIS, so the boundaries are pinned exactly.
+
+test('every Friday from 1 June to 25 August 2026 is exactly 12 dates', () => {
+  const out = datesInRange('2026-06-01', '2026-08-25', [5]);
+  assert.equal(out.length, 12);
+  assert.equal(out[0], '2026-06-05', 'first Friday on or after Monday 1 June');
+  assert.equal(out[out.length - 1], '2026-08-21', '28 Aug is past the end date');
+  assert.deepEqual(out, [
+    '2026-06-05','2026-06-12','2026-06-19','2026-06-26',
+    '2026-07-03','2026-07-10','2026-07-17','2026-07-24','2026-07-31',
+    '2026-08-07','2026-08-14','2026-08-21',
+  ]);
+});
+
+test('both ends of the range are inclusive', () => {
+  // 2026-06-05 is a Friday; asking for exactly that day returns it.
+  assert.deepEqual(datesInRange('2026-06-05', '2026-06-05', [5]), ['2026-06-05']);
+  // A range ending ON a Friday includes it.
+  assert.equal(datesInRange('2026-06-01', '2026-06-05', [5]).length, 1);
+  // A range ending the day before excludes it.
+  assert.equal(datesInRange('2026-06-01', '2026-06-04', [5]).length, 0);
+});
+
+test('several weekdays at once, in date order', () => {
+  const out = datesInRange('2026-06-01', '2026-06-14', [1, 5]); // Mondays + Fridays
+  assert.deepEqual(out, ['2026-06-01', '2026-06-05', '2026-06-08', '2026-06-12']);
+});
+
+test('ranges spanning a month and a year boundary do not drop a day', () => {
+  assert.deepEqual(datesInRange('2026-01-29', '2026-02-02', [0,1,2,3,4,5,6]),
+    ['2026-01-29','2026-01-30','2026-01-31','2026-02-01','2026-02-02']);
+  assert.deepEqual(datesInRange('2026-12-30', '2027-01-02', [0,1,2,3,4,5,6]),
+    ['2026-12-30','2026-12-31','2027-01-01','2027-01-02']);
+});
+
+test('February in a leap year keeps the 29th', () => {
+  const out = datesInRange('2028-02-27', '2028-03-01', [0,1,2,3,4,5,6]);
+  assert.deepEqual(out, ['2028-02-27','2028-02-28','2028-02-29','2028-03-01']);
+});
+
+test('no weekdays chosen, or a backwards range, returns nothing', () => {
+  assert.deepEqual(datesInRange('2026-06-01', '2026-08-25', []), []);
+  assert.deepEqual(datesInRange('2026-08-25', '2026-06-01', [5]), []);
+});
+
+test('a malformed date throws rather than guessing', () => {
+  assert.throws(() => datesInRange('01/06/2026', '2026-08-25', [5]), DataError);
+});
+
+test('backfilled Fridays price to 4,800 NIS at 400/day', () => {
+  const dates = datesInRange('2026-06-01', '2026-08-25', [5]);
+  const events = dates.map((d, i) => ({
+    id: 'bf' + i, type: 'day', date: d, recorded_at: '2026-08-25T12:00:00+03:00',
+    worked: true, portion: 'full', streams: ['ops'], note: '',
+  }));
+  const s = reduce(doc(...events, pay({ id: 'p', date: '2026-08-12', amount_agorot: 200000 })));
+  assert.equal(s.days.length, 12);
+  assert.equal(s.earned_agorot, 480000);
+  assert.equal(s.received_agorot, 200000);
+  assert.equal(s.balance_agorot, 280000, '2,800 NIS outstanding');
+});
+
+// ── pasted date lists ────────────────────────────────────────────────────────
+
+test('the exact list of extra days parses to 7 dates', () => {
+  const r = parseDateList('2026-06-15, 2026-06-16, 2026-06-17, 2026-07-30, 2026-08-01, 2026-08-06, 2026-08-08');
+  assert.deepEqual(r.bad, []);
+  assert.deepEqual(r.dates, [
+    '2026-06-15','2026-06-16','2026-06-17','2026-07-30','2026-08-01','2026-08-06','2026-08-08',
+  ]);
+});
+
+test('separators can be commas, spaces or new lines, and order does not matter', () => {
+  const r = parseDateList('2026-08-08\n2026-06-15  2026-07-30,2026-06-16');
+  assert.deepEqual(r.dates, ['2026-06-15','2026-06-16','2026-07-30','2026-08-08']);
+});
+
+test('day-first slash dates are accepted', () => {
+  assert.deepEqual(parseDateList('15/06/2026 1.8.2026').dates, ['2026-06-15','2026-08-01']);
+});
+
+test('duplicates collapse instead of double-charging a day', () => {
+  assert.deepEqual(parseDateList('2026-06-15, 2026-06-15, 15/06/2026').dates, ['2026-06-15']);
+});
+
+test('anything not understood is reported, never silently dropped', () => {
+  const r = parseDateList('2026-06-15, next friday, 2026-13-40, 2026-02-31');
+  assert.deepEqual(r.dates, ['2026-06-15']);
+  assert.deepEqual(r.bad, ['next', 'friday', '2026-13-40', '2026-02-31']);
+});
+
+test('empty input is empty, not an error', () => {
+  assert.deepEqual(parseDateList('').dates, []);
+  assert.deepEqual(parseDateList(null).bad, []);
+});
+
+test('Fridays plus the extra days total 19 unique days = 7,600 NIS', () => {
+  const fridays = datesInRange('2026-06-01', '2026-08-25', [5]);
+  const extra = parseDateList('2026-06-15, 2026-06-16, 2026-06-17, 2026-07-30, 2026-08-01, 2026-08-06, 2026-08-08').dates;
+  const all = [...new Set([...fridays, ...extra])].sort();
+  assert.equal(all.length, 19, 'no overlap between the two lists');
+
+  const events = all.map((d, i) => ({
+    id: 'x' + i, type: 'day', date: d, recorded_at: '2026-08-25T12:00:00+03:00',
+    worked: true, portion: 'full', streams: ['ops'], note: '',
+  }));
+  const s = reduce(doc(...events, pay({ id: 'p', date: '2026-08-12', amount_agorot: 200000 })));
+  assert.equal(s.earned_agorot, 760000, '7,600 NIS earned');
+  assert.equal(s.balance_agorot, 560000, '5,600 NIS outstanding');
+  assert.equal(s.months.find((m) => m.month === '2026-06').days, 7);
+  assert.equal(s.months.find((m) => m.month === '2026-07').days, 6);
+  assert.equal(s.months.find((m) => m.month === '2026-08').days, 6);
+});
+
+// ── monthly retainer ─────────────────────────────────────────────────────────
+// A flat monthly fee, separate from day work. Charged on the 1st of each month
+// from the month it starts, through the month being viewed.
+
+const RET = (from_month, nis, at) => ({
+  id: 'ret-' + from_month, type: 'retainer_set', from_month,
+  amount_agorot: nis * 100, recorded_at: at || '2026-08-25T12:00:00+03:00',
+});
+
+test('a retainer starting in June charges June, July and August by 25 August', () => {
+  const s = reduce(doc(RET('2026-06', 2000)), '2026-08-25');
+  assert.equal(s.retainerCharges.length, 3);
+  assert.deepEqual(s.retainerCharges.map((c) => c.month), ['2026-06', '2026-07', '2026-08']);
+  assert.equal(s.earnedRetainer_agorot, 600000, '3 x 2,000 = 6,000 NIS');
+  assert.equal(s.earnedDays_agorot, 0);
+  assert.equal(s.earned_agorot, 600000);
+});
+
+test('the current month is charged as soon as it begins', () => {
+  assert.equal(reduce(doc(RET('2026-06', 2000)), '2026-08-01').retainerCharges.length, 3);
+  assert.equal(reduce(doc(RET('2026-06', 2000)), '2026-07-31').retainerCharges.length, 2);
+});
+
+test('a retainer does not charge for months before it starts', () => {
+  const s = reduce(doc(RET('2026-06', 2000)), '2026-06-01');
+  assert.deepEqual(s.retainerCharges.map((c) => c.month), ['2026-06']);
+});
+
+test('changing the amount applies from that month onward only', () => {
+  const s = reduce(doc(RET('2026-06', 2000), RET('2026-08', 2500)), '2026-08-25');
+  assert.deepEqual(s.retainerCharges, [
+    { month: '2026-06', amount_agorot: 200000 },
+    { month: '2026-07', amount_agorot: 200000 },
+    { month: '2026-08', amount_agorot: 250000 },
+  ]);
+  assert.equal(s.earnedRetainer_agorot, 650000);
+});
+
+test('setting the retainer to zero stops it without erasing history', () => {
+  const s = reduce(doc(RET('2026-06', 2000), RET('2026-08', 0)), '2026-10-15');
+  assert.deepEqual(s.retainerCharges.map((c) => c.month), ['2026-06', '2026-07']);
+  assert.equal(s.earnedRetainer_agorot, 400000);
+});
+
+test('a retainer crossing the new year keeps counting', () => {
+  const s = reduce(doc(RET('2026-11', 1000)), '2027-02-10');
+  assert.deepEqual(s.retainerCharges.map((c) => c.month), ['2026-11', '2026-12', '2027-01', '2027-02']);
+});
+
+test('retainer months show up in the monthly rollup even with no days worked', () => {
+  const s = reduce(doc(RET('2026-06', 2000)), '2026-07-15');
+  const june = s.months.find((m) => m.month === '2026-06');
+  assert.equal(june.days, 0);
+  assert.equal(june.retainer_agorot, 200000);
+  assert.equal(june.earned_agorot, 200000);
+});
+
+test('reduce is pure: no clock, same answer every time', () => {
+  const d = doc(RET('2026-06', 2000), day({ date: '2026-08-03' }));
+  assert.equal(reduce(d, '2026-08-25').earned_agorot, reduce(d, '2026-08-25').earned_agorot);
+  // With no asOf it falls back to the latest date in the log, never to today.
+  assert.equal(reduce(d).asOf, '2026-08-25');
+});
+
+test('a bad retainer event throws', () => {
+  assert.throws(() => reduce(doc({ id: 'x', type: 'retainer_set', from_month: '2026-06-01', amount_agorot: 1000, recorded_at: '2026-08-25T00:00:00Z' })), DataError);
+  assert.throws(() => reduce(doc({ id: 'x', type: 'retainer_set', from_month: '2026-06', amount_agorot: -1, recorded_at: '2026-08-25T00:00:00Z' })), DataError);
+  assert.throws(() => reduce(doc({ id: 'x', type: 'retainer_set', from_month: '2026-06', amount_agorot: 10.5, recorded_at: '2026-08-25T00:00:00Z' })), DataError);
+});
+
+// ── the whole picture, as requested ──────────────────────────────────────────
+
+test('19 days + 3 months retainer - 2,000 paid = 11,600 outstanding', () => {
+  const fridays = datesInRange('2026-06-01', '2026-08-25', [5]);
+  const extra = parseDateList('2026-06-15, 2026-06-16, 2026-06-17, 2026-07-30, 2026-08-01, 2026-08-06, 2026-08-08').dates;
+  const all = [...new Set([...fridays, ...extra])].sort();
+  assert.equal(all.length, 19);
+
+  const events = all.map((d, i) => ({
+    id: 'x' + i, type: 'day', date: d, recorded_at: '2026-08-25T12:00:00+03:00',
+    worked: true, portion: 'full', streams: ['ops'], note: '',
+  }));
+
+  const s = reduce(
+    doc(...events, RET('2026-06', 2000), pay({ id: 'p', date: '2026-08-12', amount_agorot: 200000 })),
+    '2026-08-25'
+  );
+
+  assert.equal(s.earnedDays_agorot, 760000, '19 days x 400 = 7,600');
+  assert.equal(s.earnedRetainer_agorot, 600000, '3 months x 2,000 = 6,000');
+  assert.equal(s.earned_agorot, 1360000, '13,600 earned in total');
+  assert.equal(s.received_agorot, 200000, '2,000 received');
+  assert.equal(s.balance_agorot, 1160000, '11,600 NIS outstanding');
 });

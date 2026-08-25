@@ -98,6 +98,15 @@ A day tagged with both streams is still **one** day at one rate. The tags are fo
 **Payments tab.** Amount, date, method, optional note. The header balance is
 `earned − received`.
 
+**Monthly retainer.** A flat fee charged every month regardless of days worked. Charged on
+the 1st of each month, from the month it starts through the current month. Setting it to 0
+stops it from that month onward without erasing anything already charged.
+
+**Fill in past days.** For catching up on a stretch. Pick weekdays plus a date range, and/or
+paste one-off dates (`YYYY-MM-DD` or `DD/MM/YYYY`, any separator). Shows exactly how many
+days it will add and what they are worth before you commit. Days already logged are left
+alone, and the whole batch lands in one commit.
+
 **Setup tab.** Rate changes apply from today onward and never re-price past days. Export CSV
 or raw JSON. Restore from the archive.
 

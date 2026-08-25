@@ -149,6 +149,7 @@ textarea{min-height:74px;resize:vertical}
     <div>Earned <b id="earned">—</b></div>
     <div>Received <b id="received">—</b></div>
   </div>
+  <div class="subs" id="breakdown"></div>
   <div id="sync"><span class="dot"></span><span id="syncText">…</span></div>
 </header>
 
@@ -228,14 +229,62 @@ textarea{min-height:74px;resize:vertical}
       <button class="btn ghost" id="sRateSave">Set new rate from today</button>
     </div>
     <div class="panel">
+      <h2>Monthly retainer</h2>
+      <div class="hint">A flat fee charged every month regardless of days worked — social
+      media management. Charged on the 1st of each month, from the starting month up to
+      and including the current one.</div>
+      <div class="row2">
+        <div><label for="sRetAmt">NIS per month</label><input id="sRetAmt" type="number" inputmode="numeric" step="1" min="0" placeholder="2000"></div>
+        <div><label for="sRetFrom">Starting month</label><input id="sRetFrom" type="month"></div>
+      </div>
+      <div class="hint">Set it to 0 to stop it from that month onward. Nothing already charged is erased.</div>
+      <button class="btn ghost" id="sRetSave">Set retainer</button>
+      <div class="v" id="retOut" hidden></div>
+    </div>
+    <div class="panel">
       <h2>Status</h2>
       <div class="kv"><span>Events stored</span><b id="stEvents">—</b></div>
       <div class="kv"><span>Storage protected</span><b id="stPersist">—</b></div>
       <div class="kv"><span>Last sync</span><b id="stSync">—</b></div>
       <div class="kv"><span>Current rate</span><b id="stRate">—</b></div>
+      <div class="kv"><span>Monthly retainer</span><b id="stRetainer">—</b></div>
       <button class="btn ghost" id="sExport">Export CSV</button>
       <button class="btn ghost" id="sJson">Export raw JSON</button>
     </div>
+    <div class="panel">
+      <h2>Fill in past days</h2>
+      <div class="hint">For catching up on a stretch you never logged. Days you have already
+      marked are left alone.</div>
+      <label>Which days of the week</label>
+      <div class="chips" id="bfDows">
+        <button class="chip" data-dow="1" aria-pressed="false">Mon</button>
+        <button class="chip" data-dow="2" aria-pressed="false">Tue</button>
+        <button class="chip" data-dow="3" aria-pressed="false">Wed</button>
+        <button class="chip" data-dow="4" aria-pressed="false">Thu</button>
+        <button class="chip" data-dow="5" aria-pressed="false">Fri</button>
+        <button class="chip" data-dow="6" aria-pressed="false">Sat</button>
+        <button class="chip" data-dow="0" aria-pressed="false">Sun</button>
+      </div>
+      <div class="row2">
+        <div><label for="bfFrom">From</label><input id="bfFrom" type="date"></div>
+        <div><label for="bfTo">To</label><input id="bfTo" type="date"></div>
+      </div>
+      <label for="bfList">Plus any one-off dates (optional)</label>
+      <textarea id="bfList" placeholder="2026-06-15, 2026-06-16, 2026-06-17" style="min-height:60px"></textarea>
+      <label>Portion</label>
+      <div class="chips" id="bfPortion">
+        <button class="chip" data-bfp="full" aria-pressed="true">Full day</button>
+        <button class="chip" data-bfp="half" aria-pressed="false">Half day</button>
+      </div>
+      <label>Streams</label>
+      <div class="chips" id="bfStreams">
+        <button class="chip" data-bfs="ops" aria-pressed="true">Ops</button>
+        <button class="chip camp" data-bfs="campaign" aria-pressed="false">Campaign</button>
+      </div>
+      <div class="v" id="bfPreview" style="margin-top:12px">Choose the days and a date range.</div>
+      <button class="btn" id="bfAdd" disabled>Add these days</button>
+    </div>
+
     <div class="panel">
       <h2>Is my backup safe?</h2>
       <div class="hint">Reads the backup and checks it can still be opened and holds everything on this phone. Changes nothing. Press this whenever you want reassurance.</div>
