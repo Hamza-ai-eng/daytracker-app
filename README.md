@@ -43,21 +43,26 @@ holding the unlocked phone.
 
 ---
 
-## Setup, once
+## Live
 
-**1. Two repos.**
+**App:** https://hamza-ai-eng.github.io/daytracker-app/src/
+**Phase 0 harness:** https://hamza-ai-eng.github.io/daytracker-app/src/phase0.html
 
 | Repo | Visibility | Holds |
 |---|---|---|
-| `daytracker-app` | public | this code. No secrets — the token is typed on the phone, never committed. |
-| `daytracker-data` | **private** | `days.enc.json`, the encrypted record. |
+| [`daytracker-app`](https://github.com/Hamza-ai-eng/daytracker-app) | public | this code. No secrets — the token is typed on the phone, never committed. |
+| [`daytracker-data`](https://github.com/Hamza-ai-eng/daytracker-data) | **private** | `days.enc.json`, the encrypted record. |
 
 Separate because Pages on a private repo needs Pro and serves publicly anyway.
 
-**2. Serve the app.** Push `src/` to `daytracker-app`, then Settings → Pages → deploy from
-branch, root. It becomes `https://<username>.github.io/daytracker-app/`. Vercel works too.
+---
 
-**3. Make the token.** GitHub → Settings → Developer settings → Personal access tokens →
+## Setup — what is left
+
+Both repos exist, Pages is live, and the app boots. Two steps remain, and both need a human
+because they involve a credential.
+
+**1. Make the token.** GitHub → Settings → Developer settings → Personal access tokens →
 **Fine-grained tokens**:
 
 - Repository access: **only `daytracker-data`**
@@ -65,13 +70,14 @@ branch, root. It becomes `https://<username>.github.io/daytracker-app/`. Vercel 
 - Set an expiry date, and **write that date down** — the app will start failing loudly when
   it lapses, but knowing in advance is better.
 
-**4. Pick a passphrase and write it on paper.** Lose it and the GitHub archive can never be
+**2. Pick a passphrase and write it on paper.** Lose it and the GitHub archive can never be
 read again. The phone's copy survives, but the backup does not.
 
-**5. On the phone.** Open the Pages URL in Chrome → menu → Add to Home screen. Open it from
-the icon. Setup tab → username, token, passphrase → **Save & sync now**.
+**Then, on the phone.** Open https://hamza-ai-eng.github.io/daytracker-app/src/ in Chrome →
+menu → Add to Home screen. Open it from the icon. Setup tab → username (`Hamza-ai-eng` is
+already the default), token, passphrase → **Save & sync now**.
 
-**6. Laptop.** `cp .env.example .env`, fill it in with a **read-only** token, then:
+**Laptop.** `cp .env.example .env`, fill it in with a **read-only** token, then:
 
 ```bash
 node tools/pull.mjs
@@ -128,7 +134,28 @@ artefact of the browser implementation is the entire point.
 
 ---
 
-## Phase 0
+## Phase 0 — status
+
+Confirmed on the live site (desktop Chrome at mobile size, 2026-08-25):
+
+| # | Check | Result |
+|---|---|---|
+| 0.2 | Service worker registers and activates | **PASS** — scope `/daytracker-app/src/`, 12 shell files cached |
+| 0.9 | WebCrypto round-trip, wrong passphrase rejected | **PASS** — 79 ms encrypt / 83 ms decrypt |
+| — | Manifest parses, 3 icons, "Log today" shortcut | PASS |
+| — | All assets served with correct MIME types | PASS |
+| 0.4 | Protected storage | `false`, as predicted. Chrome grants it on engagement. This is why sync exists. |
+
+Still open, because they need the actual Redmi or a token:
+
+| # | Check | Needs |
+|---|---|---|
+| 0.1 | Installs to a standalone home-screen icon | the phone |
+| 0.3 | **Survives Xiaomi's Cleaner** | the phone |
+| 0.5 | `showSaveFilePicker` on real Android | the phone (desktop says supported; Android will not) |
+| 0.6 | Phone can commit to the private repo | the phone + the token |
+| 0.7 | Stale-sha conflict recovers | the phone + the token |
+| 0.10 | Long-press "Log today" shortcut | the phone |
 
 `src/phase0.html` is the device harness. Open it on the Redmi and it runs the checks itself:
 installed-app state, service worker, protected storage, WebCrypto timing, and a live GitHub
