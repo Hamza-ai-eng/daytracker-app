@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#141210">
 <title>DayTracker</title>
@@ -10,7 +11,7 @@
 <style>
 :root{
   --bg:#141210; --panel:#1e1b18; --panel2:#262220; --line:#332e2a;
-  --ink:#f2ede7; --dim:#a2988e; --faint:#6d635b;
+  --ink:#f2ede7; --dim:#b5aca3; --faint:#978d84;
   --accent:#c8503c; --ops:#c8503c; --camp:#3f7d6a;
   --good:#5f9e7f; --bad:#d4693f; --warn:#c9a227;
   --r:14px;
@@ -18,7 +19,11 @@
 @media (prefers-color-scheme: light){
   :root{
     --bg:#f7f3ee; --panel:#fff; --panel2:#efe9e2; --line:#ded5cb;
-    --faint:#9b9188;
+    /* --ink and --dim MUST be redefined here. Left at their dark values they
+       render near-white text on a near-white page: 1.05:1, an invisible app. */
+    --ink:#241f1b; --dim:#5f564f; --faint:#7d746b;
+    --accent:#b0402d; --camp:#2f6455;
+    --good:#3f7a5c; --bad:#b04a22; --warn:#8a6f14;
   }
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -35,16 +40,18 @@ button{background:none;border:0;cursor:pointer}
 /* ── header ─────────────────────────────────────────── */
 header{
   position:sticky;top:0;z-index:20;background:var(--bg);
-  padding:calc(env(safe-area-inset-top) + 14px) 16px 10px;
+  padding:calc(env(safe-area-inset-top) + 12px) 16px 9px;
   border-bottom:1px solid var(--line);
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
 }
+.brand{font-size:15px;font-weight:700;letter-spacing:-.01em}
 .balance{display:flex;align-items:baseline;gap:8px}
 .balance .n{font-size:38px;font-weight:700;letter-spacing:-.02em;line-height:1}
 .balance .c{font-size:15px;color:var(--dim);font-weight:600}
-.balance .lbl{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.09em;margin-bottom:4px}
+.lbl{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.09em;margin-bottom:6px}
 .subs{display:flex;gap:18px;margin-top:8px;font-size:13px;color:var(--dim)}
 .subs b{color:var(--ink);font-weight:600}
-#sync{margin-top:8px;font-size:12px;color:var(--faint);display:flex;align-items:center;gap:6px}
+#sync{font-size:12px;color:var(--faint);display:flex;align-items:center;gap:6px}
 #sync.bad{color:var(--bad);font-weight:600}
 #sync .dot{width:7px;height:7px;border-radius:50%;background:var(--good);flex:none}
 #sync.bad .dot{background:var(--bad)}
@@ -63,7 +70,8 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim)
 /* ── month grid ─────────────────────────────────────── */
 .mhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
 .mhead .t{font-size:17px;font-weight:700}
-.mhead button{padding:8px 14px;border-radius:9px;background:var(--panel2);color:var(--ink);font-size:18px;line-height:1}
+.mhead button{min-width:46px;min-height:44px;border-radius:9px;background:var(--panel2);
+              color:var(--ink);font-size:18px;line-height:1}
 .dow{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}
 .dow span{text-align:center;font-size:11px;color:var(--faint);font-weight:600}
 .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
@@ -73,6 +81,8 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim)
   position:relative;border:1.5px solid transparent;touch-action:manipulation;user-select:none;
 }
 .cell.pad{background:none;pointer-events:none}
+.cell:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.cell.locked{opacity:.3}
 .cell .d{font-size:15px;font-weight:600}
 .cell.today{border-color:var(--dim)}
 .cell.full{background:var(--accent);color:#fff}
@@ -93,7 +103,8 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim)
 .prow{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--panel2);border-radius:10px;padding:11px 13px}
 .prow .amt{font-weight:700;font-size:17px;white-space:nowrap}
 .prow .meta{font-size:12px;color:var(--dim);margin-top:2px}
-.prow button{color:var(--faint);font-size:19px;padding:4px 6px}
+.prow button{color:var(--faint);font-size:22px;min-width:44px;min-height:44px;
+             display:flex;align-items:center;justify-content:center;flex:none}
 .empty{color:var(--faint);font-size:14px;text-align:center;padding:22px 0}
 
 /* ── forms ──────────────────────────────────────────── */
@@ -143,13 +154,7 @@ textarea{min-height:74px;resize:vertical}
 <body>
 
 <header>
-  <div class="lbl" id="balLabel">Outstanding</div>
-  <div class="balance"><div class="n" id="bal">—</div><div class="c">NIS</div></div>
-  <div class="subs">
-    <div>Earned <b id="earned">—</b></div>
-    <div>Received <b id="received">—</b></div>
-  </div>
-  <div class="subs" id="breakdown"></div>
+  <div class="brand">DayTracker</div>
   <div id="sync"><span class="dot"></span><span id="syncText">…</span></div>
 </header>
 
@@ -161,7 +166,7 @@ textarea{min-height:74px;resize:vertical}
 
 <main>
   <!-- DAYS -->
-  <section id="v-days">
+  <section id="v-days" role="tabpanel" aria-labelledby="tab-days">
     <div class="panel">
       <div class="mhead">
         <button id="prevM" aria-label="Previous month">‹</button>
@@ -187,7 +192,16 @@ textarea{min-height:74px;resize:vertical}
   </section>
 
   <!-- PAYMENTS -->
-  <section id="v-pay" hidden>
+  <section id="v-pay" role="tabpanel" aria-labelledby="tab-pay" hidden>
+    <div class="panel">
+      <div class="lbl" id="balLabel">Outstanding</div>
+      <div class="balance"><div class="n" id="bal">—</div><div class="c">NIS</div></div>
+      <div class="subs">
+        <div>Earned <b id="earned">—</b></div>
+        <div>Received <b id="received">—</b></div>
+      </div>
+      <div class="subs" id="breakdown"></div>
+    </div>
     <div class="panel">
       <h2>Record a payment</h2>
       <div class="row2">
@@ -207,7 +221,7 @@ textarea{min-height:74px;resize:vertical}
   </section>
 
   <!-- SETUP -->
-  <section id="v-set" hidden>
+  <section id="v-set" role="tabpanel" aria-labelledby="tab-set" hidden>
     <div class="panel">
       <h2>Backup</h2>
       <div id="setupWarn"></div>

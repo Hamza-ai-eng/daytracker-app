@@ -127,8 +127,11 @@ function decrypt(envelope, passphrase) {
 // ── csv ──────────────────────────────────────────────────────────────────────
 
 const cell = (v) => {
-  const s = String(v == null ? '' : v);
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  let s = String(v == null ? '' : v);
+  // Excel and Sheets execute a cell that starts with = + - @ or a control char.
+  // Pin it as text. Known as CSV injection.
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 };
 
 function toCsv(state) {

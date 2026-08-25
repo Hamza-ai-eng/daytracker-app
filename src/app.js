@@ -29,13 +29,24 @@ async function refresh() {
     renderAll();
   } catch (e) {
     // Loud failure. Never a blank screen implying zero days worked.
-    document.body.innerHTML =
-      '<div style="padding:24px;font:16px/1.6 system-ui;color:#d4693f">' +
-      '<h2 style="margin:0 0 8px">The saved data could not be read</h2>' +
-      '<p style="color:#a2988e">Nothing has been changed or deleted. The record is still on this phone and in the archive.</p>' +
-      '<pre style="white-space:pre-wrap;background:#00000022;padding:12px;border-radius:8px">' +
-      String(e && e.message ? e.message : e) +
-      '</pre></div>';
+    //
+    // Built with textContent, NOT innerHTML. The message quotes data from the
+    // archive — a stream name, an event type — and interpolating that into HTML
+    // would turn a corrupt or tampered file into script execution on this origin,
+    // which is exactly where the token and passphrase live.
+    document.body.textContent = '';
+    const wrap = el('div');
+    wrap.setAttribute('style', 'padding:24px;font:16px/1.6 system-ui;color:#d4693f');
+    const h = el('h2', null, 'The saved data could not be read');
+    h.setAttribute('style', 'margin:0 0 8px');
+    wrap.appendChild(h);
+    const p = el('p', null, 'Nothing has been changed or deleted. The record is still on this phone and in the archive.');
+    p.setAttribute('style', 'color:#a2988e');
+    wrap.appendChild(p);
+    const pre = el('pre', null, String(e && e.message ? e.message : e));
+    pre.setAttribute('style', 'white-space:pre-wrap;background:#00000022;padding:12px;border-radius:8px');
+    wrap.appendChild(pre);
+    document.body.appendChild(wrap);
     throw e;
   }
 }
@@ -125,6 +136,8 @@ function renderGrid() {
 
     if (rec && rec.note) cell.appendChild(el('div', 'note', '•'));
 
+    if (date > td) cell.classList.add('locked');
+    cell.setAttribute('aria-label', cellLabel(date, rec));
     attachCell(cell, date);
     grid.appendChild(cell);
   }
@@ -136,10 +149,20 @@ function renderGrid() {
   $('mEarned').textContent = (mm ? fmtNis(mm.earned_agorot) : '0') + ' NIS';
 }
 
-/** Tap cycles full → half → clear. Press-and-hold opens the detail sheet. */
+/**
+ * Tap cycles full → half → clear. Press-and-hold opens the detail sheet.
+ *
+ * A tap on a FUTURE date does nothing. This is a billing record: a fat-fingered
+ * tomorrow silently adds 400 NIS to what you claim you are owed. Long-press still
+ * opens the sheet, so a deliberate entry is possible — it just cannot be accidental.
+ */
 function attachCell(cell, date) {
   let timer = null;
   let held = false;
+  const future = date > today();
+
+  cell.setAttribute('role', 'button');
+  cell.tabIndex = 0;
 
   const start = () => {
     held = false;
@@ -161,8 +184,28 @@ function attachCell(cell, date) {
   cell.addEventListener('contextmenu', (e) => e.preventDefault());
   cell.addEventListener('click', () => {
     if (held) { held = false; return; }
+    if (future) return; // never by accident
     cycleDay(date);
   });
+  cell.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (!future) cycleDay(date);
+    } else if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+      e.preventDefault();
+      openSheet(date);
+    }
+  });
+}
+
+/** What a screen reader should say for one day cell. */
+function cellLabel(date, rec) {
+  const d = new Date(date + 'T12:00:00');
+  const when = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  if (!rec) return when + ', not logged' + (date > today() ? ', future date' : '');
+  const parts = [when, rec.portion === 'full' ? 'full day' : 'half day', rec.streams.join(' and ')];
+  if (rec.note) parts.push('has a note');
+  return parts.join(', ');
 }
 
 function lastStreams() {
@@ -171,7 +214,25 @@ function lastStreams() {
   return arr.length ? arr : ['ops'];
 }
 
-async function cycleDay(date) {
+/**
+ * Writes are serialised.
+ *
+ * Every tap decides the next state by reading `index`, which is only rebuilt after
+ * the previous write's refresh() completes. Two fast taps would both read the same
+ * stale value and both write "full", so a double-tap silently logged the wrong
+ * portion. Queueing the writes makes each one see the result of the last.
+ */
+let writeChain = Promise.resolve();
+function serialise(fn) {
+  writeChain = writeChain.then(fn, fn);
+  return writeChain;
+}
+
+function cycleDay(date) {
+  return serialise(() => cycleDayNow(date));
+}
+
+async function cycleDayNow(date) {
   const rec = index.get(date);
   const next = !rec ? 'full' : rec.portion === 'full' ? 'half' : 'none';
 
@@ -404,8 +465,12 @@ function download(name, text, mime) {
 }
 
 function csvCell(v) {
-  const s = String(v == null ? '' : v);
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  let s = String(v == null ? '' : v);
+  // Excel and Sheets execute a cell that starts with = + - @ or a control char.
+  // A note pasted from a customer message is enough to trigger it, so the text is
+  // pinned as text with a leading quote. Known as CSV injection.
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
 function exportCsv() {

@@ -60,6 +60,9 @@ function explain(res) {
   if (res.status === 403) return new SyncError('GitHub refused (403). Token lacks Contents write permission, or you are rate limited.', 'auth');
   if (res.status === 404) return new SyncError('Repo or path not found (404). Check the owner name and that the token can see ' + CONFIG.repo + '.', 'config');
   if (res.status === 409 || res.status === 422) return new SyncError('Conflict — the file moved on while writing.', 'conflict');
+  if (res.status >= 500) {
+    return new SyncError('GitHub is having a problem (' + res.status + '). Your entry is saved here and will back up when it recovers.', 'transient');
+  }
   return new SyncError('GitHub error ' + res.status, 'http');
 }
 
@@ -159,6 +162,10 @@ export async function push(reason) {
         await new Promise((r) => setTimeout(r, 250 * attempt));
         continue;
       }
+      // A network failure is not a fault, it is a phone in a dead spot. Say so.
+      if (e instanceof TypeError) {
+        lastErr = new SyncError('No connection', 'offline');
+      }
       // Anything else — auth, corrupt, wrong passphrase — must not be retried blindly.
       break;
     }
@@ -233,16 +240,30 @@ export function lastSyncText() {
   const err = get(KEYS.syncError);
   const iso = get(KEYS.lastSync);
   if (!isConfigured()) return { text: 'Not backed up — set up sync', bad: true };
-  if (err) return { text: 'Sync failing: ' + err, bad: true };
+
+  if (err) {
+    // Offline is the ordinary case: the entry is safe here and will go up later.
+    // Only shout when something is actually wrong and needs a decision.
+    if (err === 'No connection') {
+      const when = iso ? ' · last backup ' + agoText(iso) : '';
+      return { text: 'Saved here, no connection' + when, bad: false };
+    }
+    return { text: err, bad: true };
+  }
   if (!iso) return { text: 'Never synced', bad: true };
 
+  const days = Math.floor((Date.now() - Date.parse(iso)) / 86400000);
+  return { text: 'Backed up ' + agoText(iso), bad: days >= 3 };
+}
+
+function agoText(iso) {
   const mins = Math.floor((Date.now() - Date.parse(iso)) / 60000);
-  if (mins < 1) return { text: 'Synced just now', bad: false };
-  if (mins < 60) return { text: 'Synced ' + mins + ' min ago', bad: false };
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + ' min ago';
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return { text: 'Synced ' + hrs + 'h ago', bad: false };
+  if (hrs < 24) return hrs + 'h ago';
   const days = Math.floor(hrs / 24);
-  return { text: 'Synced ' + days + ' day' + (days === 1 ? '' : 's') + ' ago', bad: days >= 3 };
+  return days + ' day' + (days === 1 ? '' : 's') + ' ago';
 }
 
 export { DecryptError };
