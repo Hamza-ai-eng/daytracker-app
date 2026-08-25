@@ -1,0 +1,10 @@
+{
+  "name": "daytracker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AlDay3a working-day and payment log. Zero dependencies by design.",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

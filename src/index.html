@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#141210">
+<title>DayTracker</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📓</text></svg>">
+<style>
+:root{
+  --bg:#141210; --panel:#1e1b18; --panel2:#262220; --line:#332e2a;
+  --ink:#f2ede7; --dim:#a2988e; --faint:#6d635b;
+  --accent:#c8503c; --ops:#c8503c; --camp:#3f7d6a;
+  --good:#5f9e7f; --bad:#d4693f; --warn:#c9a227;
+  --r:14px;
+}
+@media (prefers-color-scheme: light){
+  :root{
+    --bg:#f7f3ee; --panel:#fff; --panel2:#efe9e2; --line:#ded5cb;
+    --faint:#9b9188;
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font:16px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  padding-bottom:env(safe-area-inset-bottom);
+  overscroll-behavior-y:contain;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+
+/* ── header ─────────────────────────────────────────── */
+header{
+  position:sticky;top:0;z-index:20;background:var(--bg);
+  padding:calc(env(safe-area-inset-top) + 14px) 16px 10px;
+  border-bottom:1px solid var(--line);
+}
+.balance{display:flex;align-items:baseline;gap:8px}
+.balance .n{font-size:38px;font-weight:700;letter-spacing:-.02em;line-height:1}
+.balance .c{font-size:15px;color:var(--dim);font-weight:600}
+.balance .lbl{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.09em;margin-bottom:4px}
+.subs{display:flex;gap:18px;margin-top:8px;font-size:13px;color:var(--dim)}
+.subs b{color:var(--ink);font-weight:600}
+#sync{margin-top:8px;font-size:12px;color:var(--faint);display:flex;align-items:center;gap:6px}
+#sync.bad{color:var(--bad);font-weight:600}
+#sync .dot{width:7px;height:7px;border-radius:50%;background:var(--good);flex:none}
+#sync.bad .dot{background:var(--bad)}
+
+/* ── tabs ───────────────────────────────────────────── */
+nav{display:flex;gap:4px;padding:10px 12px 0;position:sticky;top:0;z-index:19}
+nav button{
+  flex:1;padding:11px 8px;border-radius:10px 10px 0 0;color:var(--dim);
+  font-weight:600;font-size:14px;border-bottom:2px solid transparent;
+}
+nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent);background:var(--panel)}
+main{padding:14px 12px 90px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:12px}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);margin:0 0 10px}
+
+/* ── month grid ─────────────────────────────────────── */
+.mhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.mhead .t{font-size:17px;font-weight:700}
+.mhead button{padding:8px 14px;border-radius:9px;background:var(--panel2);color:var(--ink);font-size:18px;line-height:1}
+.dow{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}
+.dow span{text-align:center;font-size:11px;color:var(--faint);font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.cell{
+  aspect-ratio:1/1;border-radius:11px;background:var(--panel2);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  position:relative;border:1.5px solid transparent;touch-action:manipulation;user-select:none;
+}
+.cell.pad{background:none;pointer-events:none}
+.cell .d{font-size:15px;font-weight:600}
+.cell.today{border-color:var(--dim)}
+.cell.full{background:var(--accent);color:#fff}
+.cell.half{background:linear-gradient(160deg,var(--accent) 50%,var(--panel2) 50%);color:var(--ink)}
+.cell.future{opacity:.35}
+.cell .tag{display:flex;gap:2px;height:5px}
+.cell .tag i{width:5px;height:5px;border-radius:50%;display:block}
+.cell .tag i.ops{background:#fff}
+.cell .tag i.camp{background:var(--camp)}
+.cell.full .tag i.camp{background:#bfe6d8}
+.cell .note{position:absolute;top:4px;right:5px;font-size:9px;opacity:.85}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--dim)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.hint{font-size:12px;color:var(--faint);margin-top:10px;line-height:1.5}
+
+/* ── payments ───────────────────────────────────────── */
+.plist{display:flex;flex-direction:column;gap:8px}
+.prow{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--panel2);border-radius:10px;padding:11px 13px}
+.prow .amt{font-weight:700;font-size:17px;white-space:nowrap}
+.prow .meta{font-size:12px;color:var(--dim);margin-top:2px}
+.prow button{color:var(--faint);font-size:19px;padding:4px 6px}
+.empty{color:var(--faint);font-size:14px;text-align:center;padding:22px 0}
+
+/* ── forms ──────────────────────────────────────────── */
+label{display:block;font-size:12px;color:var(--dim);margin:10px 0 5px;font-weight:600}
+input,select,textarea{
+  width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);
+  background:var(--bg);color:var(--ink);
+}
+textarea{min-height:74px;resize:vertical}
+.btn{
+  display:block;width:100%;padding:14px;border-radius:11px;background:var(--accent);
+  color:#fff;font-weight:700;margin-top:14px;text-align:center;
+}
+.btn.ghost{background:var(--panel2);color:var(--ink)}
+.btn.danger{background:transparent;color:var(--bad);border:1px solid var(--bad)}
+.btn:disabled{opacity:.45}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* ── chips ──────────────────────────────────────────── */
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{padding:10px 16px;border-radius:999px;background:var(--panel2);font-size:14px;font-weight:600;border:1.5px solid transparent}
+.chip[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+.chip.camp[aria-pressed="true"]{background:var(--camp);border-color:var(--camp)}
+
+/* ── sheet ──────────────────────────────────────────── */
+.scrim{position:fixed;inset:0;background:#000a;z-index:40;display:none}
+.scrim.on{display:block}
+.sheet{
+  position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--panel);
+  border-radius:20px 20px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom) + 20px);
+  transform:translateY(101%);transition:transform .2s ease;max-height:88vh;overflow:auto;
+}
+.sheet.on{transform:none}
+.sheet h3{margin:2px 0 4px;font-size:19px}
+.sheet .sub{color:var(--dim);font-size:13px;margin-bottom:14px}
+.grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px}
+.warn{background:#c9a2271f;border:1px solid #c9a22755;color:var(--ink);padding:10px 12px;border-radius:10px;font-size:13px;margin-top:10px}
+.kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
+.kv:last-child{border-bottom:0}
+.kv span:first-child{color:var(--dim)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="lbl" id="balLabel">Outstanding</div>
+  <div class="balance"><div class="n" id="bal">—</div><div class="c">NIS</div></div>
+  <div class="subs">
+    <div>Earned <b id="earned">—</b></div>
+    <div>Received <b id="received">—</b></div>
+  </div>
+  <div id="sync"><span class="dot"></span><span id="syncText">…</span></div>
+</header>
+
+<nav role="tablist">
+  <button role="tab" id="tab-days" aria-selected="true">Days</button>
+  <button role="tab" id="tab-pay" aria-selected="false">Payments</button>
+  <button role="tab" id="tab-set" aria-selected="false">Setup</button>
+</nav>
+
+<main>
+  <!-- DAYS -->
+  <section id="v-days">
+    <div class="panel">
+      <div class="mhead">
+        <button id="prevM" aria-label="Previous month">‹</button>
+        <div class="t" id="mTitle">—</div>
+        <button id="nextM" aria-label="Next month">›</button>
+      </div>
+      <div class="dow"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+      <div class="grid" id="grid"></div>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>Full day</span>
+        <span><i style="background:linear-gradient(160deg,var(--accent) 50%,var(--panel2) 50%)"></i>Half day</span>
+        <span><i style="background:var(--camp)"></i>Campaign</span>
+      </div>
+      <div class="hint">Tap cycles a day: full → half → clear. Press and hold to set streams and write the day's note.</div>
+    </div>
+    <div class="panel">
+      <h2>This month</h2>
+      <div class="kv"><span>Days worked</span><b id="mDays">0</b></div>
+      <div class="kv"><span>Full / half</span><b id="mFH">0 / 0</b></div>
+      <div class="kv"><span>Ops / campaign</span><b id="mStreams">0 / 0</b></div>
+      <div class="kv"><span>Earned</span><b id="mEarned">0 NIS</b></div>
+    </div>
+  </section>
+
+  <!-- PAYMENTS -->
+  <section id="v-pay" hidden>
+    <div class="panel">
+      <h2>Record a payment</h2>
+      <div class="row2">
+        <div><label for="pAmt">Amount (NIS)</label><input id="pAmt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="2000"></div>
+        <div><label for="pDate">Date</label><input id="pDate" type="date"></div>
+      </div>
+      <label for="pMethod">Method</label>
+      <select id="pMethod"><option value="cash">Cash</option><option value="transfer">Bank transfer</option><option value="other">Other</option></select>
+      <label for="pNote">Note (optional)</label>
+      <input id="pNote" type="text" placeholder="e.g. August">
+      <button class="btn" id="pAdd">Add payment</button>
+    </div>
+    <div class="panel">
+      <h2>Received</h2>
+      <div class="plist" id="plist"></div>
+    </div>
+  </section>
+
+  <!-- SETUP -->
+  <section id="v-set" hidden>
+    <div class="panel">
+      <h2>Backup</h2>
+      <div id="setupWarn"></div>
+      <label for="sOwner">GitHub username</label>
+      <input id="sOwner" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="your-github-username">
+      <label for="sToken">Fine-grained token (Contents: read &amp; write on the data repo)</label>
+      <input id="sToken" type="password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="github_pat_…">
+      <label for="sPass">Passphrase (encrypts the archive)</label>
+      <input id="sPass" type="password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="the one you wrote on paper">
+      <div class="warn">Write the passphrase on paper. Lose it and the GitHub archive can never be read again — only the copy on this phone survives.</div>
+      <button class="btn" id="sSave">Save &amp; sync now</button>
+      <button class="btn ghost" id="sTest">Test connection</button>
+    </div>
+    <div class="panel">
+      <h2>Day rate</h2>
+      <label for="sRate">NIS per full day (half days are half this)</label>
+      <input id="sRate" type="number" inputmode="numeric" step="1" min="1" placeholder="400">
+      <div class="hint">Changing this does not re-price past days. The new rate applies from today onward.</div>
+      <button class="btn ghost" id="sRateSave">Set new rate from today</button>
+    </div>
+    <div class="panel">
+      <h2>Status</h2>
+      <div class="kv"><span>Events stored</span><b id="stEvents">—</b></div>
+      <div class="kv"><span>Storage protected</span><b id="stPersist">—</b></div>
+      <div class="kv"><span>Last sync</span><b id="stSync">—</b></div>
+      <div class="kv"><span>Current rate</span><b id="stRate">—</b></div>
+      <button class="btn ghost" id="sExport">Export CSV</button>
+      <button class="btn ghost" id="sJson">Export raw JSON</button>
+    </div>
+    <div class="panel">
+      <h2>Restore</h2>
+      <div class="hint">Pulls the archive from GitHub and replaces everything on this phone. This is the drill to run after reinstalling — and once a quarter regardless.</div>
+      <button class="btn danger" id="sRestore">Restore from archive</button>
+    </div>
+  </section>
+</main>
+
+<div class="scrim" id="scrim"></div>
+
+<!-- day detail sheet -->
+<div class="sheet" id="daySheet">
+  <div class="grab"></div>
+  <h3 id="dsTitle">—</h3>
+  <div class="sub" id="dsSub"></div>
+  <label>Portion</label>
+  <div class="chips">
+    <button class="chip" data-portion="full" aria-pressed="false">Full day</button>
+    <button class="chip" data-portion="half" aria-pressed="false">Half day</button>
+    <button class="chip" data-portion="none" aria-pressed="false">Not worked</button>
+  </div>
+  <label>Streams</label>
+  <div class="chips">
+    <button class="chip" data-stream="ops" aria-pressed="false">Ops</button>
+    <button class="chip camp" data-stream="campaign" aria-pressed="false">Campaign</button>
+  </div>
+  <label for="dsNote">Note for this day</label>
+  <textarea id="dsNote" placeholder="What happened that day"></textarea>
+  <button class="btn" id="dsSave">Save</button>
+  <button class="btn ghost" id="dsCancel">Cancel</button>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
