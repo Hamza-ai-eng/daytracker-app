@@ -178,6 +178,43 @@ rather than on a timer.
 
 ---
 
+## Security posture
+
+Reviewed 2026-08-25 by attacking the running app, not by reading the code.
+
+| Concern | Position |
+|---|---|
+| XSS via notes / event data | All user text reaches the DOM through `textContent`. Verified with live `<img onerror>` and `<script>` payloads in day notes, payment notes and event types — rendered as literal text everywhere, including the crash screen. |
+| Crash screen | Was built with `innerHTML`, and its message quotes archive data. A tampered file could have run script on this origin. Rebuilt with `textContent`. |
+| Content Security Policy | `script-src 'self'` (inline injection blocked, verified), `connect-src` limited to `api.github.com` (exfiltration blocked, verified), `default-src 'none'`, no framing, no form action. |
+| Token and passphrase | `localStorage` on a single-purpose origin with zero third-party script. Never logged, never in a URL, never sent anywhere but api.github.com. The CSP means even a successful XSS could not send them out. |
+| Supply chain | No dependencies. Nothing to be compromised upstream. |
+| Data at rest (remote) | AES-GCM-256, PBKDF2-SHA256 at 310k. GitHub holds ciphertext. |
+| Data at rest (phone) | Plaintext IndexedDB, deliberately — a passphrase on every open would kill the one-tap goal. Not a defence against an unlocked phone in someone else's hands. |
+| CSV export | Cells beginning `= + - @` are pinned as text. Excel and Sheets execute them otherwise. |
+| Corrupt or tampered archive | Refuses to decrypt and refuses to overwrite. Never guesses. |
+| Public repo | Full history scanned for tokens and passphrases. Clean. Only the app code is public; the record is in a separate private repo. |
+
+**Known and accepted:** an unlocked phone gives up the record and the token. Rotate with
+`node tools/rekey.mjs` and revoke the token on GitHub if a phone is lost.
+
+## Accessibility and usability
+
+Both colour schemes pass WCAG AA on every measured pair (light 4.58–14.77, dark 4.50–16.06).
+Day cells are `role="button"`, focusable, and carry spoken labels. Tap targets are 44px
+except the calendar cells at 41px, which is the 7-column grid on a 375px screen and still
+well above the 24px minimum.
+
+A tap on a future date does nothing — on a billing record an accidental tomorrow silently
+adds a day's rate. Long-press still allows a deliberate entry.
+
+Writes are serialised, so a fast double-tap gives full-then-half rather than full twice.
+
+Being offline reads "Saved here, no connection" and is not styled as an error, because it
+is the ordinary case.
+
+---
+
 ## Layout
 
 ```
