@@ -44,7 +44,13 @@ async function addEvent(ev, reason) {
   await append(ev);
   await refresh();
   // Immediately, never on a timer — MIUI may kill the app before a timer fires.
-  pushSoon(reason, () => renderSync());
+  pushSoon(reason, onSynced);
+  renderSync();
+}
+
+/** A sync can bring entries DOWN as well as up. If it did, redraw or the screen lies. */
+function onSynced(r) {
+  if (r && r.localUpdated) refresh();
   renderSync();
 }
 
@@ -407,6 +413,9 @@ function exportCsv() {
   for (const d of state.days) {
     rows.push(['day', d.date, d.portion, d.streams.join('+'), (d.value_agorot / 100).toFixed(2), '', d.note, d.recorded_at, d.logged_after_days]);
   }
+  for (const c of state.retainerCharges || []) {
+    rows.push(['retainer', c.month + '-01', '', '', (c.amount_agorot / 100).toFixed(2), '', 'monthly retainer ' + c.month, '', '']);
+  }
   for (const p of [...state.payments].reverse()) {
     rows.push(['payment', p.date, '', '', (p.amount_agorot / 100).toFixed(2), p.method, p.note, p.recorded_at, '']);
   }
@@ -612,7 +621,7 @@ async function bulkAdd() {
   renderSetup();
 
   pushSoon('backfill ' + events.length + ' days', (r, e) => {
-    renderSync();
+    onSynced(r);
     alert(e
       ? 'Added ' + events.length + ' days here, but the backup failed:' +
         String.fromCharCode(10, 10) + e.message
@@ -722,9 +731,9 @@ function wire() {
 
   // Coming back to the app is a good moment to catch up on a failed sync.
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && isConfigured()) pushSoon('resume', () => renderSync());
+    if (!document.hidden && isConfigured()) pushSoon('resume', onSynced);
   });
-  window.addEventListener('online', () => { if (isConfigured()) pushSoon('online', () => renderSync()); });
+  window.addEventListener('online', () => { if (isConfigured()) pushSoon('online', onSynced); });
 
   $('pDate').value = today();
 }
@@ -750,7 +759,7 @@ async function main() {
     if (!index.get(today())) cycleDay(today());
   }
 
-  if (isConfigured()) pushSoon('open', () => renderSync());
+  if (isConfigured()) pushSoon('open', onSynced);
 }
 
 main();

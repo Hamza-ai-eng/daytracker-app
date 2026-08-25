@@ -118,6 +118,7 @@ export async function push(reason) {
 
       let events = local;
       let remoteHasAll = false;
+      let localUpdated = false;
 
       if (remote) {
         if (remote.version !== SCHEMA_VERSION) {
@@ -127,7 +128,10 @@ export async function push(reason) {
         events = mergeEvents(local, remoteEvents);
 
         // The remote brought us something we did not have — take it before anything else.
-        if (events.length !== local.length) await replaceAll(events);
+        if (events.length !== local.length) {
+          await replaceAll(events);
+          localUpdated = true; // the caller must redraw, or the screen lies
+        }
 
         remoteHasAll = remoteHasEvery(events, remoteEvents);
       }
@@ -136,7 +140,7 @@ export async function push(reason) {
         set(KEYS.lastSha, sha);
         set(KEYS.lastSync, new Date().toISOString());
         set(KEYS.syncError, '');
-        return { pushed: false, events: events.length };
+        return { pushed: false, events: events.length, localUpdated };
       }
 
       const doc = { version: SCHEMA_VERSION, events };
@@ -147,7 +151,7 @@ export async function push(reason) {
       set(KEYS.lastSha, out && out.content ? out.content.sha : '');
       set(KEYS.lastSync, new Date().toISOString());
       set(KEYS.syncError, '');
-      return { pushed: true, events: events.length };
+      return { pushed: true, events: events.length, localUpdated };
     } catch (e) {
       lastErr = e;
       // A conflict is worth retrying: re-read, re-merge, re-push.

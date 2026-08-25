@@ -82,7 +82,9 @@ async function resolveConfig() {
     process.exit(1);
   }
 
-  let passphrase = env.DT_PASSPHRASE;
+  // .env, then the environment, then ask. The environment case exists so this can
+  // run from a script or a scheduled task without a passphrase sitting in a file.
+  let passphrase = env.DT_PASSPHRASE || process.env.DT_PASSPHRASE;
   if (!passphrase) {
     if (!process.stdin.isTTY) {
       console.error('No DT_PASSPHRASE in .env, and no terminal available to ask on.');
@@ -133,6 +135,9 @@ function toCsv(state) {
   const rows = [['type', 'date', 'portion', 'streams', 'amount_nis', 'method', 'note', 'recorded_at', 'logged_after_days']];
   for (const d of state.days) {
     rows.push(['day', d.date, d.portion, d.streams.join('+'), (d.value_agorot / 100).toFixed(2), '', d.note, d.recorded_at, d.logged_after_days]);
+  }
+  for (const c of state.retainerCharges || []) {
+    rows.push(['retainer', c.month + '-01', '', '', (c.amount_agorot / 100).toFixed(2), '', 'monthly retainer ' + c.month, '', '']);
   }
   for (const p of [...state.payments].reverse()) {
     rows.push(['payment', p.date, '', '', (p.amount_agorot / 100).toFixed(2), p.method, p.note, p.recorded_at, '']);
