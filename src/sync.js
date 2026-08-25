@@ -164,6 +164,37 @@ export async function push(reason) {
   throw lastErr;
 }
 
+/**
+ * Read the archive and report what is in it, WITHOUT touching the phone's copy.
+ *
+ * This is the safe version of the restore drill. It proves the three things that
+ * actually matter — the archive exists, the passphrase still opens it, and it holds
+ * everything the phone holds — without anyone having to uninstall anything.
+ */
+export async function verifyArchive() {
+  if (!isConfigured()) throw new SyncError('Not set up yet — add owner, token and passphrase in Settings.', 'config');
+
+  const { doc, sha } = await fetchRemote();
+  if (!doc) throw new SyncError('There is no archive yet. Press "Save & sync now" first.', 'empty');
+  if (doc.version !== SCHEMA_VERSION) {
+    throw new SyncError('Archive schema version ' + doc.version + ' cannot be read by this app.', 'schema');
+  }
+
+  const local = await allEvents();
+  const remoteEvents = doc.events || [];
+  const remoteIds = new Set(remoteEvents.map((e) => e.id));
+  const missing = local.filter((e) => !remoteIds.has(e.id));
+
+  return {
+    sha,
+    remoteCount: remoteEvents.length,
+    localCount: local.length,
+    missing: missing.length,
+    complete: missing.length === 0,
+    doc,
+  };
+}
+
 /** Restore: pull the archive down and replace whatever is on the phone. */
 export async function pull() {
   if (!isConfigured()) throw new SyncError('Not set up yet — add owner, token and passphrase in Settings.', 'config');

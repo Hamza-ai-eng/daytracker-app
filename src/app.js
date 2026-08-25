@@ -3,7 +3,7 @@
 import { reduce, byDate, fmtNis, STREAMS, DataError } from './reducer.js';
 import { append, buildDoc, count, newId, nowStamp, today, replaceAll } from './store.js';
 import { KEYS } from './config.js';
-import { push, pull, pushSoon, isConfigured, lastSyncText, get, set, owner } from './sync.js';
+import { push, pull, pushSoon, verifyArchive, isConfigured, lastSyncText, get, set, owner } from './sync.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, txt) => {
@@ -409,6 +409,41 @@ async function exportJson() {
   download('daytracker-' + today() + '.json', JSON.stringify(doc, null, 2), 'application/json');
 }
 
+async function checkBackup() {
+  const box = $('checkOut');
+  const btn = $('sCheck');
+  box.hidden = false;
+  box.className = 'v';
+  box.textContent = 'Checking...';
+  btn.disabled = true;
+  try {
+    const r = await verifyArchive();
+    const st = reduce(r.doc);
+    const NL = String.fromCharCode(10);
+    box.className = 'v ' + (r.complete ? 'ok' : 'err');
+    box.textContent = [
+      r.complete
+        ? 'OK - your backup is safe.'
+        : r.missing + ' entries are NOT backed up yet.',
+      '',
+      'It opened with your passphrase, so it can be restored.',
+      '',
+      'In the backup:',
+      '  ' + st.days.length + ' days worked',
+      '  ' + st.payments.length + ' payments',
+      '  ' + fmtNis(st.balance_agorot) + ' NIS outstanding',
+    ].concat(
+      r.complete ? [] : ['', 'Press "Save & sync now" above, then check again.']
+    ).join(NL);
+  } catch (e) {
+    box.className = 'v err';
+    box.textContent = 'Could not read the backup.' + String.fromCharCode(10, 10) +
+      (e && e.message ? e.message : e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function restore() {
   if (!confirm('Pull the archive from GitHub and REPLACE everything on this phone?\n\nUse this after reinstalling, or as the quarterly drill.')) return;
   try {
@@ -482,6 +517,7 @@ function wire() {
   $('sRateSave').addEventListener('click', setRate);
   $('sExport').addEventListener('click', exportCsv);
   $('sJson').addEventListener('click', exportJson);
+  $('sCheck').addEventListener('click', checkBackup);
   $('sRestore').addEventListener('click', restore);
 
   // Coming back to the app is a good moment to catch up on a failed sync.

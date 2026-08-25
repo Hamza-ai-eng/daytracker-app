@@ -134,6 +134,9 @@ textarea{min-height:74px;resize:vertical}
 .kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
 .kv:last-child{border-bottom:0}
 .kv span:first-child{color:var(--dim)}
+.v{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;background:#00000030;padding:10px 12px;border-radius:9px;white-space:pre-wrap;margin-top:10px;line-height:1.5}
+.v.ok{color:var(--good)}
+.v.err{color:var(--bad)}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
 </style>
 </head>
@@ -234,9 +237,15 @@ textarea{min-height:74px;resize:vertical}
       <button class="btn ghost" id="sJson">Export raw JSON</button>
     </div>
     <div class="panel">
+      <h2>Is my backup safe?</h2>
+      <div class="hint">Reads the backup and checks it can still be opened and holds everything on this phone. Changes nothing. Press this whenever you want reassurance.</div>
+      <button class="btn" id="sCheck">Check my backup</button>
+      <div class="v" id="checkOut" hidden></div>
+    </div>
+    <div class="panel">
       <h2>Restore</h2>
-      <div class="hint">Pulls the archive from GitHub and replaces everything on this phone. This is the drill to run after reinstalling — and once a quarter regardless.</div>
-      <button class="btn danger" id="sRestore">Restore from archive</button>
+      <div class="hint">Only needed on a new phone, or after reinstalling. Pulls the backup down and replaces everything here.</div>
+      <button class="btn danger" id="sRestore">Restore from backup</button>
     </div>
   </section>
 </main>

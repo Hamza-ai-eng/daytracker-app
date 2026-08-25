@@ -3,6 +3,10 @@
 //
 //   node tools/pull.mjs
 //
+// Needs no setup. The GitHub token comes from the gh CLI you are already logged into,
+// and the passphrase is asked for at the prompt and never written anywhere. A .env
+// can override both if you want it unattended.
+//
 // READ ONLY. This script never writes to GitHub. The phone is the only writer —
 // two writers against one file is how a year of records gets lost to a conflict.
 //
@@ -12,8 +16,10 @@
 
 import { pbkdf2Sync, createDecipheriv } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline';
 
 import { reduce, fmtNis } from '../src/reducer.js';
 import { CONFIG } from '../src/config.js';
@@ -22,23 +28,74 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const OUT_DIR = process.env.DT_OUT || 'C:\\Home\\Finance\\daytracker';
 
-// ── config from .env (never committed; matches the alday3a-meta-mcp pattern) ──
+// ── config ───────────────────────────────────────────────────────────────────
 
-function loadEnv() {
+function readEnvFile() {
   const f = join(ROOT, '.env');
-  if (!existsSync(f)) {
-    console.error('No .env found at ' + f + '\nCopy .env.example to .env and fill it in.');
-    process.exit(1);
-  }
   const env = {};
+  if (!existsSync(f)) return env;
   for (const line of readFileSync(f, 'utf8').split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
     if (m) env[m[1]] = m[2].replace(/^["']|["']$/g, '');
   }
-  for (const k of ['DT_OWNER', 'DT_TOKEN', 'DT_PASSPHRASE']) {
-    if (!env[k]) { console.error('Missing ' + k + ' in .env'); process.exit(1); }
-  }
   return env;
+}
+
+/** Reuse the gh CLI's existing login so there is nothing extra to set up. */
+function tokenFromGh() {
+  try {
+    return execFileSync('gh', ['auth', 'token'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Ask for the passphrase without echoing it, and without storing it anywhere. */
+function askHidden(prompt) {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    let shown = false;
+    rl._writeToOutput = () => {
+      if (!shown) {
+        shown = true;
+        process.stdout.write(prompt);
+      }
+    };
+    rl.question(prompt, (answer) => {
+      rl.close();
+      process.stdout.write('\n');
+      resolve(answer);
+    });
+  });
+}
+
+async function resolveConfig() {
+  const env = readEnvFile();
+  const owner = env.DT_OWNER || CONFIG.owner;
+  const token = env.DT_TOKEN && !env.DT_TOKEN.includes('xxxx') ? env.DT_TOKEN : tokenFromGh();
+
+  if (!token) {
+    console.error('No token. Either run: gh auth login    or put DT_TOKEN in .env');
+    process.exit(1);
+  }
+
+  let passphrase = env.DT_PASSPHRASE;
+  if (!passphrase) {
+    if (!process.stdin.isTTY) {
+      console.error('No DT_PASSPHRASE in .env, and no terminal available to ask on.');
+      process.exit(1);
+    }
+    passphrase = await askHidden('Passphrase (the one you set on the phone): ');
+  }
+  if (!passphrase) {
+    console.error('No passphrase given.');
+    process.exit(1);
+  }
+
+  return { owner, token, passphrase };
 }
 
 // ── decrypt: mirror of src/crypto.js ─────────────────────────────────────────
@@ -89,25 +146,40 @@ function toCsv(state) {
 
 // ── run ──────────────────────────────────────────────────────────────────────
 
-const env = loadEnv();
+const { owner, token, passphrase } = await resolveConfig();
+
 const url =
-  CONFIG.api + '/repos/' + env.DT_OWNER + '/' + CONFIG.repo + '/contents/' + CONFIG.path +
+  CONFIG.api + '/repos/' + owner + '/' + CONFIG.repo + '/contents/' + CONFIG.path +
   '?ref=' + encodeURIComponent(CONFIG.branch);
 
 const res = await fetch(url, {
   headers: {
-    Authorization: 'Bearer ' + env.DT_TOKEN,
+    Authorization: 'Bearer ' + token,
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
   },
 });
 
-if (res.status === 404) { console.error('No archive at ' + CONFIG.path + ' yet.'); process.exit(1); }
-if (!res.ok) { console.error('GitHub returned ' + res.status + ' ' + res.statusText); process.exit(1); }
+if (res.status === 404) {
+  console.error('No archive at ' + CONFIG.path + ' yet. Sync from the phone first.');
+  process.exit(1);
+}
+if (!res.ok) {
+  console.error('GitHub returned ' + res.status + ' ' + res.statusText);
+  process.exit(1);
+}
 
 const meta = await res.json();
 const envelope = JSON.parse(Buffer.from(meta.content, 'base64').toString('utf8'));
-const doc = decrypt(envelope, env.DT_PASSPHRASE);
+
+let doc;
+try {
+  doc = decrypt(envelope, passphrase);
+} catch (e) {
+  console.error(e.message);
+  process.exit(1);
+}
+
 const state = reduce(doc);
 
 mkdirSync(OUT_DIR, { recursive: true });
@@ -115,9 +187,12 @@ const stamp = new Date().toISOString().slice(0, 10);
 writeFileSync(join(OUT_DIR, 'daytracker.json'), JSON.stringify(doc, null, 2), 'utf8');
 writeFileSync(join(OUT_DIR, 'daytracker-' + stamp + '.csv'), toCsv(state), 'utf8');
 
-console.log('Pulled ' + doc.events.length + ' events (commit ' + String(meta.sha).slice(0, 8) + ')');
+console.log('');
+console.log('Backup opened and copied.  (commit ' + String(meta.sha).slice(0, 8) + ')');
+console.log('  entries     : ' + doc.events.length);
 console.log('  days worked : ' + state.days.length);
 console.log('  earned      : ' + fmtNis(state.earned_agorot) + ' NIS');
 console.log('  received    : ' + fmtNis(state.received_agorot) + ' NIS');
 console.log('  outstanding : ' + fmtNis(state.balance_agorot) + ' NIS');
-console.log('  written to  : ' + OUT_DIR);
+console.log('  saved to    : ' + OUT_DIR);
+console.log('');
