@@ -2,3 +2,4 @@
 *.local
 node_modules/
 .claude/settings.local.json
+rekey-backup.json
